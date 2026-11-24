@@ -1,0 +1,515 @@
+---
+title: "Homework_5"
+editor: visual
+format:
+  html:
+    embed-resources: true
+---
+
+mygithub :https://github.com/WendyWu1011
+---
+
+```{r}
+# Q1 (a) we need to creat a waldCI class follow the S4 rules, and it includes these properties.
+#First we need to write a definition of class. and then after that we can use real number to change the numeric. we can use the formular to calculate the mean and  standard error
+
+setClass(
+  "waldCI",
+  slots = c(
+    lb = "numeric",
+    ub = "numeric",
+    level = "numeric"
+  )
+)
+#Then we need to creat a function if we have ub and lb we can directly calculate 'new()' if we have mean and standard error check the level and then calculate 'new()'
+#' @param level Confidence level strictly between 0 and 1.
+#' @param lb,ub Lower and upper bounds.
+#' @param mean Point estimate at the center of the interval.
+#' @param sterr Nonnegative standard error.
+#' @return A waldCI object.
+
+onefinite <- function(x) {
+  is.numeric(x) && length(x) == 1L && is.finite(x)
+}
+
+validlevel <- function(level) {
+ onefinite(level) && level > 0 && level < 1
+}
+
+waldci <- function(level, lb = NULL, ub = NULL,
+                         mean = NULL, sterr = NULL) {
+  frombounds <- !is.null(lb) && !is.null(ub) &&
+    is.null(mean) && is.null(sterr)
+
+  if (frombounds) {
+    return(new("waldCI", lb = lb, ub = ub, level = level))
+  }
+
+  fromestimate <- !is.null(mean) && !is.null(sterr) &&
+    is.null(lb) && is.null(ub)
+
+  if (!fromestimate) {
+    stop("Supply either lb and ub, or mean and sterr.")
+  }
+
+  if (!validlevel(level)) {
+    stop("The confidence level must between 0 and 1.")
+  }
+
+  if (!onefinite(mean)) {
+    stop("The mean must be a single finite number.")
+  }
+
+  if (!onefinite(sterr) || sterr < 0) {
+    stop("The standard error must be a single nonnegative finite number.")
+  }
+#use the formula to calculate upper and lower bound
+  z <- qnorm((1 - level) / 2, lower.tail = FALSE)
+  halfwidth <- z * sterr
+
+  lb <- mean - halfwidth
+  ub <- mean + halfwidth
+
+  new("waldCI", lb = lb, ub = ub, level = level)
+}
+
+
+#Then The validator is responsible for checking whether these values can form a valid range. We use function
+#took the lower bound and upbound and level from slot
+
+setValidity("waldCI", function(object) {
+  lb <- slot(object, "lb")
+  ub <- slot(object, "ub")
+  level <- slot(object, "level")
+
+  #lower bound and upper bound not infinite number
+  
+  if (length(lb) != 1L || length(ub) != 1L ||
+      !is.finite(lb) || !is.finite(ub)) {
+    return("Each bound must be a single finite number.")
+  }
+  
+  #upper bound must be more than lower bound
+  
+  if (lb > ub) {
+    return("The lower bound cannot exceed the upper bound.")
+  }
+  
+  #confidence interval must between 0 and 1
+  
+  if (length(level) != 1L || !is.finite(level) ||
+      level <= 0 || level >= 1) {
+    return("The confidence level must be strictly between 0 and 1.")
+  }
+
+  TRUE
+})
+
+#Show method
+
+setMethod("show", "waldCI", function(object) {
+  cat(sprintf(
+    "%g%% Wald CI: [%g, %g]\n",
+    100 * slot(object, "level"),
+    slot(object, "lb"),
+    slot(object, "ub")
+  ))
+})
+
+#Use formula to calculate mean and standard error 
+
+setGeneric("lb", function(x) standardGeneric("lb"))
+setGeneric("ub", function(x) standardGeneric("ub"))
+setGeneric("level", function(x) standardGeneric("level"))
+setGeneric("sterr", function(x) standardGeneric("sterr"))
+setGeneric("mean")
+
+setMethod("lb", "waldCI", function(x) slot(x, "lb"))
+setMethod("ub", "waldCI", function(x) slot(x, "ub"))
+setMethod("level", "waldCI", function(x) slot(x, "level"))
+
+setMethod("mean", "waldCI", function(x, ...) {
+  (lb(x) + ub(x)) / 2
+})
+
+setMethod("sterr", "waldCI", function(x) {
+  z <- qnorm((1 - level(x)) / 2, lower.tail = FALSE)
+  (ub(x) - lb(x)) / (2 * z)
+})
+
+
+
+
+```
+
+```{r}
+# Q1 (a) Setters. I use this rule to modify
+#lb or ub - only move the specified endpoints
+setGeneric("lb<-", function(x, value) standardGeneric("lb<-"))
+setGeneric("ub<-", function(x, value) standardGeneric("ub<-"))
+setGeneric("mean<-", function(x, value) standardGeneric("mean<-"))
+setGeneric("sterr<-", function(x, value) standardGeneric("sterr<-"))
+setGeneric("level<-", function(x, value) standardGeneric("level<-"))
+
+setReplaceMethod("lb", "waldCI", function(x, value) {
+ waldci(level = level(x), lb = value, ub = ub(x))
+})
+
+setReplaceMethod("ub", "waldCI", function(x, value) {
+ waldci(level = level(x), lb = lb(x), ub = value)
+})
+#mean - translate the whole interval while maintaining the interval width
+setReplaceMethod("mean", "waldCI", function(x, value) {
+  waldci(level = level(x), mean = value, sterr = sterr(x))
+})
+#standard error - keep the center and confidence level, recalculate the endpoints
+setReplaceMethod("sterr", "waldCI", function(x, value) {
+  waldci(level = level(x), mean = mean(x), sterr = value)
+})
+#level - keep the center and standard error, recalculate the endpoints
+setReplaceMethod("level", "waldCI", function(x, value) {
+  waldci(level = value, mean = mean(x), sterr = sterr(x))
+})
+
+#Check if there are any values within the closed confidence interval
+#' @param x A waldCI object.
+#' @param value A single finite number.
+#' @return TRUE if value lies in the interval, otherwise FALSE.
+
+setGeneric("contains", function(x, value) standardGeneric("contains"))
+
+setMethod("contains", "waldCI", function(x, value) {
+  if (!is.numeric(value) || length(value) != 1L || !is.finite(value)) {
+    stop("value must be a single finite number.")
+  }
+
+  lb(x) <= value && value <= ub(x)
+})
+
+#Check if two closed confidence intervals overlap.
+#' @param x,y Two waldCI objects.
+#' @return TRUE if the intervals have at least one same point, otherwise FALSE.
+setGeneric("overlap", function(x, y) standardGeneric("overlap"))
+
+setMethod("overlap", c("waldCI", "waldCI"), function(x, y) {
+  max(lb(x), lb(y)) <= min(ub(x), ub(y))
+})
+
+#as.numeric to return .
+setMethod("as.numeric", "waldCI", function(x, ...) {
+  c(lb(x), ub(x))
+})
+
+#Transform the endpoints of a confidence interval.
+#' @param x A waldCI object.
+#' @param transformfun A function that is monotonic over the interval.
+#' @return A waldCI object with transformed bounds and the same level.
+transformCI <- function(x, transformfun) {
+  warning("Use a function that is monotonic over the interval.")
+
+  lower <- transformfun(lb(x))
+  upper <- transformfun(ub(x))
+
+  if (!is.numeric(lower) || length(lower) != 1L || !is.finite(lower) ||
+      !is.numeric(upper) || length(upper) != 1L || !is.finite(upper)) {
+    stop("The function must return one finite number for each endpoint.")
+  }
+
+  bounds <- sort(c(lower, upper))
+  waldci(level = level(x), lb = bounds[1], ub = bounds[2])
+}
+```
+
+```{r}
+#Q1 (b) use (a) we have writen to calculate
+ci1 <- waldci(level = 0.95, lb = 17.2, ub = 24.7)
+ci2 <- waldci(level = 0.99, mean = 13, sterr = 2.5)
+ci3 <- waldci(level = 0.75, lb = 27.43, ub = 39.22)
+
+# the three confidence intervals
+ci1
+ci2
+ci3
+
+# transform the intervals to numeric vectors
+as.numeric(ci1)
+as.numeric(ci2)
+as.numeric(ci3)
+
+# Read individual values
+lb(ci2)
+ub(ci2)
+mean(ci1)
+sterr(ci3)
+level(ci2)
+
+# change the intervals
+lb(ci2) <- 10.5
+mean(ci3) <- 34
+level(ci3) <- 0.8
+
+# Check the overlap
+contains(ci1, 17)
+contains(ci3, 44)
+overlap(ci1, ci2)
+
+# Transform the intervals
+eci1 <- transformCI(ci1, sqrt)
+eci1
+mean(transformCI(ci2, log))
+```
+
+```{r}
+#Q1 (c)Show that your validator does not allow the creation of invalid confidence intervals:
+
+#negative standard error
+try(waldci(level = 0.95, mean = 13, sterr = -4.5))
+
+#lb > ub
+try(waldci(level = 0.95, lb = 50,  ub=10))
+
+#Infinite bounds
+try(waldci(level = 0.95, lb = 17, ub = Inf))
+
+#invalid use of the setters
+ci_test <- ci1
+try(lb(ci_test) <- 40)
+
+```
+
+```{r}
+#Q2
+library(data.table)
+
+tennis_url <- "https://raw.githubusercontent.com/azhou5849/tennis-atp-sackmann-data/master/atp_matches_2019.csv"
+tennis <- fread(tennis_url)
+#test running is ok 
+dim(tennis)
+
+#Q2 (a) How many tournaments took place in 2019?
+tennis[, .(number = uniqueN(tourney_id))]
+#it is same as Homework4 also have 128 different match
+```
+
+```{r}
+#Q2 (b)Did any player win more than one tournament? If so, how many players won more than one tournament, and how many tournaments did the most winning player(s) win?
+
+#Let's first filter out the finals, and then count how many finals each player won.
+# Count titles won by each player
+titles <- tennis[
+  round == "F",
+  .(titleswon = .N),
+  by = winner_name
+]
+
+# Keep players who won more than one 
+winners <- titles[titleswon > 1]
+winners[, .(
+  number = .N,
+  mosttitles = max(titleswon)
+)]
+winners[titleswon == max(titleswon)]
+#There were 12 players who won more than one event. Dominic Thiem and Novak Djokovic each won 5 events and tied for the first place.
+```
+
+```{r}
+#Q2 (c) Is there any evidence that winners have more aces than losers? 
+
+#First, subtract the ace count of the loser from that of the winner for each game, and then calculate the average.
+tennis[
+  !is.na(w_ace) & !is.na(l_ace),
+  .(
+    matches = .N,
+    avg_winner = round(mean(w_ace), 2),
+    avg_loser = round(mean(l_ace), 2),
+    avg_difference = round(mean(w_ace - l_ace), 2),
+    pct_winner_more = round(100 * mean(w_ace > l_ace), 2)
+  )
+]
+#In the 2,694 matches of the ace data, the winners averaged 1.70 more aces per game than the losers, and they had a higher winning rate in 57.28% of the matches.
+```
+
+```{r}
+#Q2 (d) Identify the player(s) with the highest win-rate.
+#Group the winners and losers together in the same column, and then calculate the winning rate based on the players.
+
+# Put wins and losses into one table
+results <- rbindlist(list(
+  tennis[, .(player = winner_name, win = 1L)],
+  tennis[, .(player = loser_name, win = 0L)]
+))
+
+# Calculate
+rates <- results[
+  ,
+  .(matches = .N, wins = sum(win), win_rate = sum(win) / .N),
+  by = player
+]
+
+eligible_players <- rates[matches >= 5]
+
+# Show the highest win rate
+eligible_players[
+  win_rate == max(win_rate),
+  .(player, matches, wins, win_percent = round(100 * win_rate, 2))
+]
+#in the 5 or more match , Rafael Nadal had the highest winning rate. He achieved 60 victories out of 69 matches (86.96%).
+```
+
+```{r}
+#Q3 (a)How many major and minor spikes in cases were there?
+
+# As Homework 4, first, summarize the daily new cases into the monthly average daily number of cases. If a month has a higher number than both the previous and the following months, it is considered a local peak. When the number reaches 100,000 cases per day, it is classified as a major spike, while the rest are classified as minor spikes. And then we use data table to write it
+
+library(plotly)
+
+covid_url <- paste0(
+  "https://raw.githubusercontent.com/nytimes/covid-19-data/",
+  "refs/heads/master/rolling-averages/us-states.csv"
+)
+covid <- fread(covid_url)
+
+# Sum reported cases by date, then average within each month
+daily <- covid[, .(total = sum(cases, na.rm = TRUE)), by = date]
+
+monthly <- daily[
+  ,
+  .(avg = mean(total)),
+  by = .(month = as.Date(format(as.Date(date), "%Y-%m-01")))
+]
+setorder(monthly, month)
+
+peaks <- monthly[
+  avg > shift(avg) &
+    avg > shift(avg, type = "lead")
+]
+peaks[, spike := ifelse(avg >= 100000, "Major", "Minor")]
+
+peaks[, .(number_of_peaks = .N), by = spike]
+
+#Then use plotly to draw the graph
+
+plot_ly() %>%
+  add_lines(
+    data = monthly,
+    x = ~month, y = ~avg,
+    name = "Monthly trend",
+    line = list(color = "black"),
+    hovertemplate = "%{x|%b %Y}<br>%{y:,.0f} cases/day<extra></extra>"
+  ) %>%
+  add_markers(
+    data = peaks[spike == "Major"],
+    x = ~month, y = ~avg,
+    name = "Major",
+    marker = list(color = "red", size = 10),
+    hovertemplate = "%{x|%b %Y}<br>%{y:,.0f} cases/day<extra>Major</extra>"
+  ) %>%
+  add_markers(
+    data = peaks[spike == "Minor"],
+    x = ~month, y = ~avg,
+    name = "Minor",
+    marker = list(color = "blue", size = 10),
+    hovertemplate = "%{x|%b %Y}<br>%{y:,.0f} cases/day<extra>Minor</extra>"
+  ) %>%
+  layout(
+    title = "Peaks in reported U.S. COVID-19 cases",
+    xaxis = list(title = "Month"),
+    yaxis = list(title = "Average daily new cases", tickformat = ","),
+    shapes = list(list(
+      type = "line",
+      xref = "paper", x0 = 0, x1 = 1,
+      yref = "y", y0 = 100000, y1 = 100000,
+      line = list(color = "pink", dash = "dash")
+    ))
+  )
+#There are 4 major and 4 minor
+```
+
+```{r}
+#Q3 (b) For the states with the highest and lowest overall rates per population, what differences do you see in their trajectories over time?
+
+#First, sum up the daily case rate per 100,000 people for each state to identify the states with the highest and lowest rates. Then, use Plotly to compare the trends of these two states.
+
+# Rank the 50 states 
+state <- covid[
+  state %in% state.name,
+  .(overall_rate = sum(cases_avg_per_100k, na.rm = TRUE)),
+  by = state
+]
+
+highest <- state[which.max(overall_rate)]
+lowest <- state[which.min(overall_rate)]
+
+rbind(highest, lowest)
+
+# Keep the daily rates for the two selected states
+trends <- covid[state %in% c(highest$state, lowest$state)]
+setorder(trends, date)
+```
+
+```{r}
+#Q3 (b) after we have this information then we can use poltly drawing the graph
+
+plot_ly() %>%
+  add_lines(
+    data = trends[state == highest$state],
+    x = ~date, y = ~cases_avg_per_100k,
+    name = highest$state,
+    line = list(color = "blue"),
+    hovertemplate = "%{x|%b %d, %Y}<br>%{y:.2f} per 100,000"
+  ) %>%
+  add_lines(
+    data = trends[state == lowest$state],
+    x = ~date, y = ~cases_avg_per_100k,
+    name = lowest$state,
+    line = list(color = "red"),
+    hovertemplate = "%{x|%b %d, %Y}<br>%{y:.2f} per 100,000"
+  ) %>%
+  layout(
+    title = "COVID-19 case rates in Rhode Island and Maine",
+    xaxis = list(title = "Date"),
+    yaxis = list(title = "Daily cases per 100,000")
+  )
+```
+
+```{r}
+#Q3 (c) Identify, to the best of your ability without a formal test, the first five states to experience Covid in a substantial way.
+
+# Find the first date each state reached the threshold
+firstdates <- covid[
+  state %in% state.name & cases_avg_per_100k >= 10,
+  .(firstdate = as.Date(min(date))),
+  by = state
+]
+setorder(firstdates, firstdate, state)
+fifthdate <- firstdates$firstdate[5L]
+five <- firstdates[firstdate <= fifthdate]
+five
+
+```
+
+```{r}
+#Q3(c) continuous use plotly drawing the graph
+plot_ly(
+  data = five,
+  x = ~firstdate,
+  y = ~state,
+  type = "scatter",
+  mode = "markers",
+  marker = list(color = "red", size = 10),
+  hovertemplate = "%{y}<br>%{x|%B %d, %Y}<extra></extra>"
+) %>%
+  layout(
+    title = "First five states to reach the COVID-19 case threshold",
+    xaxis = list(
+      title = "Date in 2020",
+      tickformat = "%b %d"
+    ),
+    yaxis = list(
+      title = "",
+      categoryorder = "array",
+      categoryarray = rev(five$state),
+      automargin = TRUE
+    )
+  )
+```
